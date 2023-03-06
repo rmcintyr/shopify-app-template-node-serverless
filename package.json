@@ -9,10 +9,12 @@
     "dev": "shopify app dev",
     "info": "shopify app info",
     "generate": "shopify app generate",
-    "deploy": "shopify app deploy"
+    "deploy": "shopify app deploy",
+    "updateUrls": "shopify app update-url --app-url https://dev-shopify-app-template.yourdomain.io --redirect-urls https://dev-shopify-app-template.yourdomain.io/auth/callback,https://dev-shopify-app-template.yourdomain.io/auth/shopify/callback,https://dev-shopify-app-template.yourdomain.io/api/auth/callback",
+    "updateUrls:offline": "shopify app update-url --app-url https://shopify-app-template.eu.ngrok.io --redirect-urls https://shopify-app-template.eu.ngrok.io/auth/callback,https://shopify-app-template.eu.ngrok.io/auth/shopify/callback,https://shopify-app-template.eu.ngrok.io/api/auth/callback"
   },
   "dependencies": {
-    "@shopify/app": "^3.0.0",
-    "@shopify/cli": "^3.0.0"
+    "@shopify/app": "^3.44.1",
+    "@shopify/cli": "^3.44.1"
   }
 }

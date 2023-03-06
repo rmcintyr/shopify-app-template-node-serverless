@@ -8,12 +8,17 @@ import shopify from "./shopify.js";
 import productCreator from "./product-creator.js";
 import GDPRWebhookHandlers from "./gdpr.js";
 
+import serverless from "serverless-http";
+
+const PROCESS_TYPE = process.env.PROCESS_TYPE;
 const PORT = parseInt(process.env.BACKEND_PORT || process.env.PORT, 10);
 
 const STATIC_PATH =
   process.env.NODE_ENV === "production"
     ? `${process.cwd()}/frontend/dist`
     : `${process.cwd()}/frontend/`;
+
+console.log("Serving Static Content from [" + STATIC_PATH + "]")
 
 const app = express();
 
@@ -60,10 +65,25 @@ app.get("/api/products/create", async (_req, res) => {
 app.use(serveStatic(STATIC_PATH, { index: false }));
 
 app.use("/*", shopify.ensureInstalledOnShop(), async (_req, res, _next) => {
-  return res
+  res
     .status(200)
     .set("Content-Type", "text/html")
     .send(readFileSync(join(STATIC_PATH, "index.html")));
 });
 
-app.listen(PORT);
+
+if ( PROCESS_TYPE === 'serverless' ) {
+  console.log("Running in AWS Lambda environment, not starting listener...");
+} else {
+  console.log("Not running in AWS Lambda environment, starting HTTP listener...");
+  app.listen(PORT);
+}
+
+export async function handler (event_, context) {
+    try {
+      const hndlr = serverless(app);
+      return await hndlr(event_, context);
+    } catch (err) {
+      console.log(err);
+    }
+}

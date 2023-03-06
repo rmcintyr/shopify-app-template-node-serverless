@@ -1,0 +1,195 @@
+app: shopify-app-template-node-serverless
+service: shopify-app-template
+
+frameworkVersion: '3'
+
+useDotenv: true
+
+params:
+  default:
+    scopes: "${env:SCOPES}"
+    domain: "${env:DOMAIN}"
+    SHOPIFY_API_KEY: "${env:SHOPIFY_API_KEY}"
+    SHOPIFY_API_SECRET: "${env:SHOPIFY_API_SECRET}"
+    ngrok_authtoken: "${env:ngrok_authtoken}"
+
+plugins:
+  - serverless-scriptable-plugin
+  - serverless-offline
+  - serverless-domain-manager
+  - serverless-api-gateway-caching
+  - serverless-ngrok-tunnel
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  versionFunctions: false
+  apiGateway:
+    shouldStartNameWithService: true
+  ecr:  
+   images:
+     appimage:
+       path: ./
+       buildArgs: 
+         SHOPIFY_API_KEY: ${param:SHOPIFY_API_KEY}
+
+custom:
+  ngrokTunnel:
+    tunnels: 
+      - port: 3000
+        ngrokOptions:
+          authtoken: '${param:ngrok_authtoken}'
+          region: 'au'
+          subdomain: 'shopify-serverless-testapp'
+
+  serverless-offline:
+    useChildProcesses: true
+    noPrependStageInUrl: true
+    httpPort: 3000
+    lambdaPort: 3002
+
+  customDomain:
+    domainName: '${self:provider.stage}-${self:service}.${param:domain}'
+    certificateName: '*.${param:domain}'
+    createRoute53Record: true
+    endpointType: 'regional'
+    securityPolicy: tls_1_2
+    apiType: rest
+    autoDomain: true
+    enabled: true
+
+  scriptable:
+    hooks:
+      package:initialize: 
+        - npm --prefix frontend run build
+  #     before:package:createDeploymentArtifacts:
+  #      - npm prune --omit=dev
+  #      - zip -r9 .serverless/package.zip *.js* frontend/dist node_modules 
+  #      - npm i --offline
+
+package:
+  patterns:
+     - '!frontend/**'
+     - frontend/dist
+
+
+functions:
+  ShopifyHandler:
+    #note: serverless-offline doesnt handle running from docker images - comment out the image block and uncomment the handler line
+    #before trying to run offline.  reverse before running sls deploy.
+    image:
+     name: appimage
+     command:
+       - index.handler
+    # handler: index.handler
+    # package:
+    #   artifact: .serverless/package.zip
+    environment:
+      SHOPIFY_API_KEY: ${param:SHOPIFY_API_KEY}
+      SHOPIFY_API_SECRET: ${param:SHOPIFY_API_SECRET}
+      SCOPES: "${param:scopes}"
+      HOST: "localhost"
+      PROCESS_TYPE: "serverless"
+      NODE_ENV: "production"
+    memorySize: 128
+    timeout: 5
+    role: LambdaRoleV1
+    events:
+      - http:
+          path: /
+          method: any
+          caching:
+            enabled: false
+      - http:
+          path: /{proxy+}
+          method: any
+          caching:
+            enabled: false
+
+resources:
+  Resources:
+
+    ShopifyAppCachePolicy:
+      Type: 'AWS::CloudFront::CachePolicy'
+      Properties:
+        CachePolicyConfig:
+          DefaultTTL: 86400
+          MaxTTL: 31536000
+          MinTTL: 1
+          Name: ${self:service}-${self:provider.stage}-cf-policy
+          ParametersInCacheKeyAndForwardedToOrigin:
+            CookiesConfig:
+              CookieBehavior: 'all'
+            EnableAcceptEncodingBrotli: true
+            EnableAcceptEncodingGzip: true
+            HeadersConfig:
+              HeaderBehavior: 'none'
+            #              Headers:
+            #                - Host
+            QueryStringsConfig:
+              QueryStringBehavior: 'all'
+
+    ShopifyAppCloudFrontDistribution:
+      Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Comment: ${self:provider.stage} ${self:service}
+          DefaultCacheBehavior:
+            TargetOriginId: ${self:service}-${self:provider.stage}-Origin
+            ViewerProtocolPolicy: 'redirect-to-https'
+            CachePolicyId: !Ref ShopifyAppCachePolicy
+            DefaultTTL: 30
+            AllowedMethods:
+              - 'GET'
+              - 'HEAD'
+              - 'OPTIONS'
+              - 'PUT'
+              - 'PATCH'
+              - 'POST'
+              - 'DELETE'
+            CachedMethods:
+              - 'HEAD'
+              - 'GET'
+              - 'OPTIONS'
+          Enabled: true
+          Origins:
+            - Id: ${self:service}-${self:provider.stage}-Origin
+              DomainName:
+                Fn::Join:
+                  - ""
+                  - - "Ref": "ApiGatewayRestApi"
+                    - ".execute-api.${self:provider.region}.amazonaws.com"
+              OriginPath: /dev
+              CustomOriginConfig:
+                HTTPPort: 80
+                HTTPSPort: 443
+                OriginProtocolPolicy: https-only
+
+    LambdaRoleV1:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: ${self:service}-${self:provider.stage}-LambdaRoleV1
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+            - Effect: Allow
+              Principal:
+                Service:
+                  - edgelambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: ${self:service}-${self:provider.stage}-SsrPolicyV1
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - logs:*
+                  Resource: "*"
